@@ -1,7 +1,8 @@
 package app
 
 import (
-	v002 "blog/app/upgrades/v001"
+	v001 "blog/app/upgrades/v001"
+	v002 "blog/app/upgrades/v002"
 	"fmt"
 	"io"
 	"os"
@@ -107,6 +108,9 @@ import (
 	blogmodule "blog/x/blog"
 	blogmodulekeeper "blog/x/blog/keeper"
 	blogmoduletypes "blog/x/blog/types"
+	nameservicemodule "blog/x/nameservice"
+	nameservicemodulekeeper "blog/x/nameservice/keeper"
+	nameservicemoduletypes "blog/x/nameservice/types"
 	// this line is used by starport scaffolding # stargate/app/moduleImport
 
 	appparams "blog/app/params"
@@ -166,19 +170,21 @@ var (
 		ica.AppModuleBasic{},
 		vesting.AppModuleBasic{},
 		blogmodule.AppModuleBasic{},
+		nameservicemodule.AppModuleBasic{},
 		// this line is used by starport scaffolding # stargate/app/moduleBasic
 	)
 
 	// module account permissions
 	maccPerms = map[string][]string{
-		authtypes.FeeCollectorName:     nil,
-		distrtypes.ModuleName:          nil,
-		icatypes.ModuleName:            nil,
-		minttypes.ModuleName:           {authtypes.Minter},
-		stakingtypes.BondedPoolName:    {authtypes.Burner, authtypes.Staking},
-		stakingtypes.NotBondedPoolName: {authtypes.Burner, authtypes.Staking},
-		govtypes.ModuleName:            {authtypes.Burner},
-		ibctransfertypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
+		authtypes.FeeCollectorName:        nil,
+		distrtypes.ModuleName:             nil,
+		icatypes.ModuleName:               nil,
+		minttypes.ModuleName:              {authtypes.Minter},
+		stakingtypes.BondedPoolName:       {authtypes.Burner, authtypes.Staking},
+		stakingtypes.NotBondedPoolName:    {authtypes.Burner, authtypes.Staking},
+		govtypes.ModuleName:               {authtypes.Burner},
+		ibctransfertypes.ModuleName:       {authtypes.Minter, authtypes.Burner},
+		nameservicemoduletypes.ModuleName: {authtypes.Minter, authtypes.Burner, authtypes.Staking},
 		// this line is used by starport scaffolding # stargate/app/maccPerms
 	}
 )
@@ -240,6 +246,8 @@ type App struct {
 	ScopedICAHostKeeper  capabilitykeeper.ScopedKeeper
 
 	BlogKeeper blogmodulekeeper.Keeper
+
+	NameserviceKeeper nameservicemodulekeeper.Keeper
 	// this line is used by starport scaffolding # stargate/app/keeperDeclaration
 
 	// mm is the module manager
@@ -285,6 +293,7 @@ func New(
 		ibctransfertypes.StoreKey, icahosttypes.StoreKey, capabilitytypes.StoreKey, group.StoreKey,
 		icacontrollertypes.StoreKey,
 		blogmoduletypes.StoreKey,
+		nameservicemoduletypes.StoreKey,
 		// this line is used by starport scaffolding # stargate/app/storeKey
 	)
 	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
@@ -504,6 +513,16 @@ func New(
 	)
 	blogModule := blogmodule.NewAppModule(appCodec, app.BlogKeeper, app.AccountKeeper, app.BankKeeper)
 
+	app.NameserviceKeeper = *nameservicemodulekeeper.NewKeeper(
+		appCodec,
+		keys[nameservicemoduletypes.StoreKey],
+		keys[nameservicemoduletypes.MemStoreKey],
+		app.GetSubspace(nameservicemoduletypes.ModuleName),
+
+		app.BankKeeper,
+	)
+	nameserviceModule := nameservicemodule.NewAppModule(appCodec, app.NameserviceKeeper, app.AccountKeeper, app.BankKeeper)
+
 	// this line is used by starport scaffolding # stargate/app/keeperDefinition
 
 	/**** IBC Routing ****/
@@ -570,6 +589,7 @@ func New(
 		transferModule,
 		icaModule,
 		blogModule,
+		nameserviceModule,
 		// this line is used by starport scaffolding # stargate/app/appModule
 	)
 
@@ -600,6 +620,7 @@ func New(
 		paramstypes.ModuleName,
 		vestingtypes.ModuleName,
 		blogmoduletypes.ModuleName,
+		nameservicemoduletypes.ModuleName,
 		// this line is used by starport scaffolding # stargate/app/beginBlockers
 	)
 
@@ -625,6 +646,7 @@ func New(
 		upgradetypes.ModuleName,
 		vestingtypes.ModuleName,
 		blogmoduletypes.ModuleName,
+		nameservicemoduletypes.ModuleName,
 		// this line is used by starport scaffolding # stargate/app/endBlockers
 	)
 
@@ -655,6 +677,7 @@ func New(
 		upgradetypes.ModuleName,
 		vestingtypes.ModuleName,
 		blogmoduletypes.ModuleName,
+		nameservicemoduletypes.ModuleName,
 		// this line is used by starport scaffolding # stargate/app/initGenesis
 	)
 
@@ -685,6 +708,7 @@ func New(
 		ibc.NewAppModule(app.IBCKeeper),
 		transferModule,
 		blogModule,
+		nameserviceModule,
 		// this line is used by starport scaffolding # stargate/app/appModule
 	)
 	app.sm.RegisterStoreDecoders()
@@ -711,15 +735,11 @@ func New(
 		panic(fmt.Errorf("failed to create AnteHandler: %w", err))
 	}
 
-	app.UpgradeKeeper.SetUpgradeHandler(
-		v002.UpgradeName,
-		v002.CreateUpgradeHandler(app.mm, app.configurator),
-	)
 	app.SetAnteHandler(anteHandler)
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
 	app.SetEndBlocker(app.EndBlocker)
-
+	app.setupUpgradeHandlers()
 	if loadLatest {
 		if err := app.LoadLatestVersion(); err != nil {
 			tmos.Exit(err.Error())
@@ -731,6 +751,17 @@ func New(
 	// this line is used by starport scaffolding # stargate/app/beforeInitReturn
 
 	return app
+}
+
+func (app *App) setupUpgradeHandlers() {
+	app.UpgradeKeeper.SetUpgradeHandler(
+		v001.UpgradeName,
+		v001.CreateUpgradeHandler(app.mm, app.configurator),
+	)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		v002.UpgradeName,
+		v002.CreateUpgradeHandler(app.mm, app.configurator),
+	)
 }
 
 // Name returns the name of the App
@@ -894,6 +925,7 @@ func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino
 	paramsKeeper.Subspace(icacontrollertypes.SubModuleName)
 	paramsKeeper.Subspace(icahosttypes.SubModuleName)
 	paramsKeeper.Subspace(blogmoduletypes.ModuleName)
+	paramsKeeper.Subspace(nameservicemoduletypes.ModuleName)
 	// this line is used by starport scaffolding # stargate/app/paramSubspace
 
 	return paramsKeeper

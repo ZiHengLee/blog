@@ -1,0 +1,17 @@
+{
+  "messages": [
+    {
+      "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+      "authority": "cosmos10d07y265gmmuvt4z0w9aw880jnsr700j6zn9kn",
+      "plan": {
+        "name": "v0.0.2",
+        "time": "0001-01-01T00:00:00Z",
+        "height": "250",
+        "info": "简单升级，新增模块",
+        "upgraded_client_state": null
+      }
+    }
+  ],
+  "metadata": "ipfs://QmPngptoFqAJVApdgvpW2pQXYZj7RscbHnoc5SWQ9em4JR",
+  "deposit": "10stake"
+}
