@@ -1,6 +1,7 @@
 package app
 
 import (
+	v002 "blog/app/upgrades/v001"
 	"fmt"
 	"io"
 	"os"
@@ -710,6 +711,10 @@ func New(
 		panic(fmt.Errorf("failed to create AnteHandler: %w", err))
 	}
 
+	app.UpgradeKeeper.SetUpgradeHandler(
+		v002.UpgradeName,
+		v002.CreateUpgradeHandler(app.mm, app.configurator),
+	)
 	app.SetAnteHandler(anteHandler)
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
